@@ -67,9 +67,30 @@ the reasoning from scratch.
 initially just swallowed rather than surfaced distinctly per-metric)*
 
 ## Parsing / data modeling
-*(none yet — log here if e.g. `INFO` field parsing is done with fragile
-string splitting instead of a proper structured parser, "just to get
-something rendering")*
+
+### [Sprint 3] Fragmentation ratio threshold is unreliable on near-idle/tiny instances
+- **What:** Manual testing against a fresh, nearly-empty local Redis
+  instance produced `mem_fragmentation_ratio` values above 11 —
+  correctly parsed, correctly flagged as `StatusWarn`, but wildly
+  unrepresentative of a real problem.
+- **Why:** This is a known characteristic of the metric itself, not a
+  bug in parsing or threshold logic: on an instance with very little
+  actual data, allocator/RSS overhead can dominate the ratio's
+  denominator, producing large numbers that don't reflect genuine
+  fragmentation. The `>1.5` heuristic (see internal/metrics/metrics.go)
+  is more meaningful once an instance holds a real, non-trivial amount
+  of data.
+- **Correct version:** Consider gating the fragmentation status judgment
+  on `used_memory` exceeding some minimum floor (e.g. only judge
+  fragmentation meaningfully once used_memory is above a few MB),
+  or displaying a distinct "not enough data to judge" state similar to
+  the Ops panel's "no data yet" — not decided yet, needs a deliberate
+  design pass, not a quick patch.
+- **Risk if unpaid:** A dashboard shown against a real but small/dev
+  Redis instance could display an alarming-looking warn/critical color
+  that doesn't reflect an actual problem, undermining user trust in the
+  tool's signal.
+- **Status:** open.
 
 ## UI / rendering
 *(none yet — log here if e.g. panel layout is hardcoded for one terminal
