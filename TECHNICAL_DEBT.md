@@ -27,8 +27,37 @@ the reasoning from scratch.
 ---
 
 ## Architecture / concurrency
-*(none yet — log here if e.g. error handling on a goroutine panic gets
-deferred, or channel buffering is left unbounded "for now")*
+
+### [Sprint 1] Quit requires "q" + Enter, not a single raw keypress
+- **What:** The Sprint 1 proof reads stdin line-by-line (`bufio.Reader.
+  ReadString('\n')`), so quitting needs "q" followed by Enter rather than
+  a single raw keypress.
+- **Why:** True raw-mode terminal input (no Enter required) needs either
+  a third-party terminal library or manual `termios`/syscall handling.
+  Both are unnecessary complexity for a throwaway proof sprint whose only
+  goal is showing the polling and input goroutines run independently —
+  and `bubbletea` (Sprint 2) handles raw input properly as part of its
+  own architecture anyway, making it wasted effort to solve twice.
+- **Correct version:** Sprint 2's `bubbletea` model replaces this
+  input-handling goroutine entirely; this file (`cmd/rekon/main.go`)
+  itself will be substantially rewritten, not patched.
+- **Risk if unpaid:** None in practice — this code is explicitly
+  temporary and superseded by Sprint 2, not part of the shipped v1.
+- **Status:** open, expected to be resolved by superseding rather than
+  fixing in place (Sprint 2).
+
+### [Sprint 1] Poller.Stop() panics if called twice
+- **What:** `Stop()` closes an internal channel with no guard against
+  being called more than once; a second call panics (closing an
+  already-closed channel).
+- **Why:** Out of scope for a proof-of-concept sprint whose caller
+  (`main.go`) only ever calls `Stop()` once, on the single quit path.
+- **Correct version:** Guard with a `sync.Once` or a boolean-plus-mutex
+  before this type is relied on by anything beyond Sprint 1's proof.
+- **Risk if unpaid:** Low today (single call site), but would become a
+  real bug source once more call paths exist (e.g. Sprint 2's UI adding
+  its own shutdown/error paths that might also call `Stop()`).
+- **Status:** open.
 
 ## Redis command handling
 *(none yet — log here if e.g. ACL-restricted command failures are
