@@ -1,21 +1,22 @@
 // Package model defines Rekon's bubbletea Model, Update, and View.
 //
-// This is Sprint 2's core proof: incoming poller.Snapshot values arrive
-// as just another kind of bubbletea message (tea.Msg) — the same
-// category as a keypress — and Update reacts to them by producing a new
-// Model, which View then renders. No shared mutable state between the
-// polling goroutine and the UI: the channel from internal/poller is the
-// only handoff, exactly as designed in ARCHITECTURE.md section 2.
-//
-// This sprint intentionally renders raw, unstyled text. Real panels with
-// lipgloss styling and parsed fields are Sprint 3+.
+// This is Sprint 2's core proof, now extended in Sprint 3 with real
+// parsed metrics: incoming poller.Snapshot values arrive as just another
+// kind of bubbletea message (tea.Msg) — the same category as a
+// keypress — and Update reacts to them by producing a new Model, which
+// View then renders. No shared mutable state between the polling
+// goroutine and the UI: the channel from internal/poller is the only
+// handoff, exactly as designed in ARCHITECTURE.md section 2.
 package model
 
 import (
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/rekon/rekon/internal/metrics"
 	"github.com/rekon/rekon/internal/poller"
+	"github.com/rekon/rekon/internal/redis"
 )
 
 // snapshotMsg wraps a poller.Snapshot so it can travel through
@@ -32,9 +33,10 @@ type closedMsg struct{}
 type Model struct {
 	results   <-chan poller.Snapshot
 	connected bool
-	lastLine  string
 	lastErr   error
 	pollCount int
+	memory    metrics.Memory
+	ops       metrics.Ops
 }
 
 // New creates a Model that will listen on results for incoming snapshots.
@@ -47,9 +49,10 @@ func New(results <-chan poller.Snapshot) Model {
 
 // waitForSnapshot returns a tea.Cmd — a function bubbletea will run in
 // its own goroutine — that blocks on the results channel and turns
-// whatever arrives into a tea.Msg. A tea.Cmd fires once per call, so
-// Update must call this again after each snapshot arrives to keep
-// listening; see the snapshotMsg case below.
+// whatever arrives into a tea.Msg. A tea.Cmd fires once per call: if
+// this isn't re-issued after every snapshot, Rekon would render exactly
+// one poll result and then permanently stop updating, even though the
+// poller keeps ticking forever with nowhere for its results to go.
 func waitForSnapshot(results <-chan poller.Snapshot) tea.Cmd {
 	return func() tea.Msg {
 		snap, ok := <-results
@@ -68,9 +71,7 @@ func (m Model) Init() tea.Cmd {
 }
 
 // Update reacts to one message and returns the next Model plus
-// optionally another Cmd to run. This is the function that actually
-// proves the design: a snapshotMsg arriving is handled exactly like a
-// keypress arriving — both are just tea.Msg values dispatched here.
+// optionally another Cmd to run.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
@@ -82,11 +83,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.connected = true
 			m.lastErr = nil
-			m.lastLine = firstLine(msg.Info)
+			info := redis.ParseInfo(msg.Info)
+			m.memory = metrics.ParseMemory(info)
+			m.ops = metrics.ParseOps(info)
 		}
-		// Keep listening for the next snapshot. Without re-issuing this
-		// Cmd, Rekon would render exactly one snapshot and then go
-		// silent forever, since a Cmd only fires once per call.
+		// Keep listening for the next snapshot — see waitForSnapshot's
+		// doc comment for why this re-issue is required every time.
 		return m, waitForSnapshot(m.results)
 
 	case closedMsg:
@@ -102,29 +104,78 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// View renders the current Model to text. It never changes anything —
-// it only reads m and produces a string. Deliberately plain/unstyled;
-// lipgloss panels are Sprint 3+.
-func (m Model) View() string {
-	if m.lastErr != nil {
-		return fmt.Sprintf("rekon (sprint 2 skeleton)\n\nconnection error: %v\n\npress q to quit\n", m.lastErr)
+// Panel styling. Colors are chosen per metrics.Status so the same
+// threshold judgment computed in internal/metrics drives what the user
+// sees — the View layer never re-decides what's concerning, it only
+// renders the decision metrics.go already made.
+var (
+	panelBorder = lipgloss.RoundedBorder()
+
+	statusColor = map[metrics.Status]lipgloss.Color{
+		metrics.StatusOK:       lipgloss.Color("42"),  // green
+		metrics.StatusWarn:     lipgloss.Color("214"), // orange
+		metrics.StatusCritical: lipgloss.Color("196"), // red
+		metrics.StatusUnknown:  lipgloss.Color("240"), // grey
 	}
-	if !m.connected {
-		return "rekon (sprint 2 skeleton)\n\nwaiting for first poll...\n\npress q to quit\n"
-	}
-	return fmt.Sprintf(
-		"rekon (sprint 2 skeleton)\n\npolls received: %d\nlatest: %s\n\npress q to quit\n",
-		m.pollCount, m.lastLine,
-	)
+
+	titleStyle = lipgloss.NewStyle().Bold(true)
+)
+
+func panelStyle(status metrics.Status) lipgloss.Style {
+	return lipgloss.NewStyle().
+		Border(panelBorder).
+		BorderForeground(statusColor[status]).
+		Padding(0, 1).
+		MarginRight(2)
 }
 
-// firstLine returns just the first line of a multi-line INFO reply, to
-// keep this skeleton's View compact. Real field parsing is Sprint 3.
-func firstLine(info string) string {
-	for i := 0; i < len(info); i++ {
-		if info[i] == '\r' || info[i] == '\n' {
-			return info[:i]
-		}
+// View renders the current Model to text.
+func (m Model) View() string {
+	if m.lastErr != nil {
+		return fmt.Sprintf("rekon\n\nconnection error: %v\n\npress q to quit\n", m.lastErr)
 	}
-	return info
+	if !m.connected {
+		return "rekon\n\nwaiting for first poll...\n\npress q to quit\n"
+	}
+
+	memPanel := m.renderMemoryPanel()
+	opsPanel := m.renderOpsPanel()
+
+	row := lipgloss.JoinHorizontal(lipgloss.Top, memPanel, opsPanel)
+
+	return fmt.Sprintf("%s\n\n%s\n\npolls received: %d — press q to quit\n",
+		titleStyle.Render("rekon"), row, m.pollCount)
+}
+
+func (m Model) renderMemoryPanel() string {
+	status := m.memory.FragmentationStatus()
+	content := fmt.Sprintf(
+		"Memory\nused: %d bytes\nfragmentation ratio: %.2f\nmaxmemory policy: %s\nevicted keys: %d",
+		m.memory.UsedMemoryBytes,
+		m.memory.FragmentationRatio,
+		valueOr(m.memory.MaxMemoryPolicy, "unknown"),
+		m.memory.EvictedKeys,
+	)
+	return panelStyle(status).Render(content)
+}
+
+func (m Model) renderOpsPanel() string {
+	status := m.ops.HitRatioStatus()
+	ratio, ok := m.ops.HitRatio()
+	ratioText := "no data yet"
+	if ok {
+		ratioText = fmt.Sprintf("%.1f%%", ratio*100)
+	}
+	content := fmt.Sprintf(
+		"Ops\nops/sec: %d\nkeyspace hit ratio: %s\nhits: %d  misses: %d",
+		m.ops.OpsPerSec, ratioText, m.ops.KeyspaceHits, m.ops.KeyspaceMisses,
+	)
+	return panelStyle(status).Render(content)
+}
+
+func valueOr(s, fallback string) string {
+	if s == "" {
+		return fallback
+	}
+	return s
 }
