@@ -84,6 +84,25 @@ at the time — name this explicitly if it happens, don't let it go unlogged)*
 *(none yet — log here if e.g. only one OS/architecture is actually tested
 before claiming "single static binary" support broadly)*
 
+### [Sandbox-only, not real project debt] Pinned bubbletea v0.27.1 and disabled Go module proxy/checksum verification
+- **What:** This dev sandbox pinned `bubbletea` to v0.27.1 (latest at
+  time of writing needs Go 1.24+) and used `GOPROXY=direct GOSUMDB=off`
+  to fetch dependencies straight from GitHub.
+- **Why:** The sandbox can't reach `golang.org` (needed for Go's
+  auto-toolchain-switch to 1.24+) or `proxy.golang.org`/`sum.golang.org`
+  (the normal module proxy/checksum DB). A real development machine with
+  normal internet access has none of these restrictions.
+- **Correct version:** On your own machine: `go get -u ./...` (or
+  `go get github.com/charmbracelet/bubbletea@latest`) to move to the
+  current release and current Go toolchain — no architecture change
+  needed, this is purely a fetch-environment artifact.
+- **Risk if unpaid:** None functionally — only relevant if this
+  sandbox-built go.mod/go.sum is used as-is without updating on a real
+  machine, which would mean staying on an older bubbletea release
+  unnecessarily.
+- **Status:** open, intentionally deferred to whenever development
+  moves off this sandbox — not a real code quality issue.
+
 ## Documentation drift
 *(none yet — log here if code changes and the README/Architecture.md
 aren't updated in the same commit — this is genuine debt, not just a
