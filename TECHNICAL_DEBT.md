@@ -43,8 +43,11 @@ the reasoning from scratch.
   itself will be substantially rewritten, not patched.
 - **Risk if unpaid:** None in practice — this code is explicitly
   temporary and superseded by Sprint 2, not part of the shipped v1.
-- **Status:** open, expected to be resolved by superseding rather than
-  fixing in place (Sprint 2).
+- **Status:** paid down (Sprint 2) — `cmd/rekon/main.go` now runs
+  through `tea.NewProgram(...).Run()`, which owns raw terminal input.
+  `q` alone quits, no Enter required. Verified under a faked pty
+  (this sandbox has no real TTY) showing a single 'q' keypress
+  triggering `tea.Quit` cleanly.
 
 ### [Sprint 1] Poller.Stop() panics if called twice
 - **What:** `Stop()` closes an internal channel with no guard against
