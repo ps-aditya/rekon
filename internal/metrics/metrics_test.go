@@ -37,6 +37,11 @@ func TestParseMemory_MissingFieldsDefaultToZero(t *testing.T) {
 }
 
 func TestFragmentationStatus_Boundaries(t *testing.T) {
+	// All cases here use UsedMemoryBytes above MinMeaningfulMemoryBytes,
+	// so the insufficient-data gate doesn't interfere with testing the
+	// ratio thresholds themselves.
+	const wellAboveFloor = MinMeaningfulMemoryBytes * 2
+
 	cases := []struct {
 		name  string
 		ratio float64
@@ -52,10 +57,51 @@ func TestFragmentationStatus_Boundaries(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			m := Memory{FragmentationRatio: c.ratio}
+			m := Memory{FragmentationRatio: c.ratio, UsedMemoryBytes: wellAboveFloor}
 			got := m.FragmentationStatus()
 			if got != c.want {
 				t.Errorf("ratio %.2f: got status %v, want %v", c.ratio, got, c.want)
+			}
+		})
+	}
+}
+
+func TestFragmentationStatus_InsufficientDataOnRealCapturedScenario(t *testing.T) {
+	// This is the exact scenario from Sprint 3 manual testing that
+	// surfaced the issue: a fresh, near-empty Redis instance reported
+	// used_memory ~650KB and a fragmentation ratio above 11. Before this
+	// fix, that produced StatusWarn — a misleading signal on an instance
+	// with no real problem. It must now return StatusInsufficientData.
+	m := Memory{FragmentationRatio: 11.78, UsedMemoryBytes: 650840}
+	got := m.FragmentationStatus()
+	if got != StatusInsufficientData {
+		t.Errorf("got %v, want StatusInsufficientData for a near-idle instance", got)
+	}
+}
+
+func TestFragmentationStatus_FloorBoundary(t *testing.T) {
+	cases := []struct {
+		name        string
+		usedMemory  int64
+		wantInsuff  bool
+		description string
+	}{
+		{"just below floor", MinMeaningfulMemoryBytes - 1, true, "one byte under the floor is still insufficient"},
+		{"exactly at floor", MinMeaningfulMemoryBytes, false, "at the floor, normal thresholds apply"},
+		{"well above floor", MinMeaningfulMemoryBytes * 10, false, "comfortably above, normal thresholds apply"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// Use a ratio that would be StatusWarn under normal
+			// thresholds, so the test actually distinguishes "gated as
+			// insufficient" from "happens to also be OK".
+			m := Memory{FragmentationRatio: 1.6, UsedMemoryBytes: c.usedMemory}
+			got := m.FragmentationStatus()
+			isInsuff := got == StatusInsufficientData
+			if isInsuff != c.wantInsuff {
+				t.Errorf("%s: got status %v (insufficient=%v), want insufficient=%v",
+					c.description, got, isInsuff, c.wantInsuff)
 			}
 		})
 	}

@@ -20,8 +20,32 @@ const (
 	StatusOK Status = iota
 	StatusWarn
 	StatusCritical
-	StatusUnknown // field was missing or unparseable from INFO
+	StatusUnknown          // field was missing or unparseable from INFO
+	StatusInsufficientData // field is present and valid, but the instance
+	// doesn't hold enough data yet for this particular judgment to be
+	// meaningful (distinct from StatusUnknown: the number exists, it's
+	// just not trustworthy at this scale — see FragmentationStatus).
 )
+
+// MinMeaningfulMemoryBytes is the used_memory floor below which
+// mem_fragmentation_ratio is treated as not-yet-meaningful rather than
+// judged against the normal thresholds.
+//
+// This exists because of a real finding from manual testing (Sprint 3):
+// a fresh, near-empty local Redis instance (used_memory around 650KB)
+// reported a fragmentation ratio above 11 — correctly parsed, but not
+// representative of an actual problem. At very low memory usage,
+// allocator/RSS bookkeeping overhead dominates the ratio's denominator
+// relative to the (tiny) amount of real data, producing large numbers
+// that don't mean what they'd mean on an instance with real data
+// volume.
+//
+// 5 MiB is a pragmatic default, not a value derived from a formal
+// study — it's comfortably above the ~650KB that produced the
+// misleading reading in testing, while still being small enough that
+// most real Redis deployments cross it almost immediately. Revisit if
+// real-world use shows it's set too high or too low.
+const MinMeaningfulMemoryBytes int64 = 5 * 1024 * 1024
 
 // Memory holds the memory-related fields Rekon's Memory panel needs.
 type Memory struct {
@@ -67,6 +91,9 @@ func ParseMemory(info map[string]string) Memory {
 func (m Memory) FragmentationStatus() Status {
 	if m.FragmentationRatio == 0 {
 		return StatusUnknown
+	}
+	if m.UsedMemoryBytes < MinMeaningfulMemoryBytes {
+		return StatusInsufficientData
 	}
 	switch {
 	case m.FragmentationRatio < 1.0:
