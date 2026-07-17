@@ -63,8 +63,30 @@ the reasoning from scratch.
 - **Status:** open.
 
 ## Redis command handling
-*(none yet — log here if e.g. ACL-restricted command failures are
-initially just swallowed rather than surfaced distinctly per-metric)*
+
+### [Sprint 4] Rekon's own polling commands can appear in the slowlog it displays
+- **What:** Under aggressive `slowlog-log-slower-than` settings (tested
+  with `0`, logging everything), Rekon's own `INFO`/`CLIENT LIST`/
+  `SLOWLOG GET` polling commands showed up as entries — including being
+  flagged "NEW" every single poll — in the Slowlog panel meant to show
+  the *watched* instance's activity, not Rekon's own footprint.
+- **Why:** Not filtered out currently. Under Redis's normal default
+  threshold (10ms / 10000 microseconds), this wouldn't practically
+  happen — Rekon's own commands run in single-digit microseconds — but
+  a user who deliberately lowers the threshold (as this test did) would
+  see Rekon's own polling noise mixed into real slowlog data.
+- **Correct version:** Filter Slowlog panel entries whose ClientAddr
+  matches Rekon's own connection's local address (comparable via
+  `CLIENT LIST`'s own entry, or `CLIENT GETNAME`/`CLIENT ID` on Rekon's
+  connection). Filtering by command name (e.g. hiding literal "INFO")
+  is tempting but wrong — it would also hide a legitimate other client
+  issuing the same commands, which is real signal a user might want.
+- **Risk if unpaid:** Cosmetic/noisy under unusual slowlog
+  configurations, not a correctness bug in the metrics themselves —
+  deferred rather than blocking, but should be fixed before v1 ships
+  since "own noise contaminating the watched instance's data" undercuts
+  user trust in the panel's signal.
+- **Status:** open.
 
 ## Parsing / data modeling
 
