@@ -14,14 +14,27 @@ import (
 	"github.com/rekon/rekon/internal/redis"
 )
 
-// Snapshot is one poll result: either the raw INFO text, or an error if
-// that particular poll failed. Errors are delivered on the same channel
-// rather than crashing the poller — a single failed poll (e.g. a brief
-// network hiccup) shouldn't kill the whole polling loop, only that
-// poll's result should reflect the failure.
+// slowlogFetchCount is how many recent slowlog entries to request per
+// poll. 25 is comfortably more than one poll interval is likely to
+// produce under normal conditions, while staying small enough that a
+// burst of slow commands doesn't make each poll's payload huge.
+const slowlogFetchCount = 25
+
+// Snapshot is one poll's results. Each of the three commands Rekon
+// polls (INFO, CLIENT LIST, SLOWLOG GET) has its own independent error
+// field rather than one shared error for the whole Snapshot — an
+// ACL-restricted SLOWLOG command, for example, shouldn't take down
+// the Memory/Ops panels that only need INFO.
 type Snapshot struct {
-	Info      string
-	Err       error
+	Info    string
+	InfoErr error
+
+	ClientListRaw string
+	ClientListErr error
+
+	SlowlogEntries []redis.SlowlogEntry
+	SlowlogErr     error
+
 	Timestamp time.Time
 }
 
@@ -49,8 +62,8 @@ func New(client *redis.Client, interval time.Duration) *Poller {
 
 // Start begins polling in a new goroutine. It returns immediately;
 // results arrive asynchronously on p.Results. This is the actual
-// mechanism being proven in Sprint 1: this goroutine can block on a
-// slow network call and nothing else in the program is affected.
+// mechanism proven in Sprint 1: this goroutine can block on a slow
+// network call and nothing else in the program is affected.
 func (p *Poller) Start() {
 	go func() {
 		ticker := time.NewTicker(p.interval)
@@ -62,21 +75,29 @@ func (p *Poller) Start() {
 				close(p.Results)
 				return
 			case <-ticker.C:
-				info, err := p.client.Info()
-				p.Results <- Snapshot{
-					Info:      info,
-					Err:       err,
-					Timestamp: time.Now(),
-				}
+				p.Results <- p.pollOnce()
 			}
 		}
 	}()
 }
 
+// pollOnce issues all three commands sequentially over the same
+// connection (Rekon's Client isn't concurrent-safe, and one Redis
+// connection can only have one command in flight at a time regardless)
+// and returns a Snapshot with each command's result and error tracked
+// independently.
+func (p *Poller) pollOnce() Snapshot {
+	snap := Snapshot{Timestamp: time.Now()}
+	snap.Info, snap.InfoErr = p.client.Info()
+	snap.ClientListRaw, snap.ClientListErr = p.client.ClientList()
+	snap.SlowlogEntries, snap.SlowlogErr = p.client.SlowlogGet(slowlogFetchCount)
+	return snap
+}
+
 // Stop signals the polling goroutine to exit and close Results. Safe to
-// call once; calling it twice will panic on the closed stop channel,
-// which is acceptable for this sprint's proof-of-concept scope (noted
-// in TECHNICAL_DEBT.md rather than guarded against here).
+// call once; calling it twice will panic on the closed stop channel —
+// see TECHNICAL_DEBT.md for why this is an accepted limitation while
+// there's a single call site.
 func (p *Poller) Stop() {
 	close(p.stop)
 }
