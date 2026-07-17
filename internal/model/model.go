@@ -1,16 +1,16 @@
 // Package model defines Rekon's bubbletea Model, Update, and View.
 //
-// This is Sprint 2's core proof, now extended in Sprint 3 with real
-// parsed metrics: incoming poller.Snapshot values arrive as just another
-// kind of bubbletea message (tea.Msg) — the same category as a
-// keypress — and Update reacts to them by producing a new Model, which
-// View then renders. No shared mutable state between the polling
-// goroutine and the UI: the channel from internal/poller is the only
-// handoff, exactly as designed in ARCHITECTURE.md section 2.
+// Incoming poller.Snapshot values arrive as just another kind of
+// bubbletea message (tea.Msg) — the same category as a keypress — and
+// Update reacts to them by producing a new Model, which View then
+// renders. No shared mutable state between the polling goroutine and
+// the UI: the channel from internal/poller is the only handoff, exactly
+// as designed in ARCHITECTURE.md section 2.
 package model
 
 import (
 	"fmt"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -35,24 +35,34 @@ type Model struct {
 	connected bool
 	lastErr   error
 	pollCount int
-	memory    metrics.Memory
-	ops       metrics.Ops
+
+	memory  metrics.Memory
+	ops     metrics.Ops
+	clients metrics.Clients
+
+	longIdleClients []metrics.ClientRecord
+	clientListErr   error
+
+	allSlowlogEntries  []redis.SlowlogEntry
+	newSlowlogIDs      map[int64]bool
+	slowlogLastSeenID  int64
+	slowlogHasBaseline bool // false until the first successful slowlog poll — see Update's snapshotMsg case for why this matters
+	slowlogErr         error
 }
 
 // New creates a Model that will listen on results for incoming snapshots.
 func New(results <-chan poller.Snapshot) Model {
 	return Model{
-		results:   results,
-		connected: false,
+		results: results,
 	}
 }
 
-// waitForSnapshot returns a tea.Cmd — a function bubbletea will run in
-// its own goroutine — that blocks on the results channel and turns
-// whatever arrives into a tea.Msg. A tea.Cmd fires once per call: if
-// this isn't re-issued after every snapshot, Rekon would render exactly
-// one poll result and then permanently stop updating, even though the
-// poller keeps ticking forever with nowhere for its results to go.
+// waitForSnapshot returns a tea.Cmd that blocks on the results channel
+// and turns whatever arrives into a tea.Msg. A tea.Cmd fires once per
+// call: if this isn't re-issued after every snapshot, Rekon would
+// render exactly one poll result and permanently stop updating, even
+// though the poller keeps ticking forever with nowhere for its results
+// to go.
 func waitForSnapshot(results <-chan poller.Snapshot) tea.Cmd {
 	return func() tea.Msg {
 		snap, ok := <-results
@@ -63,9 +73,7 @@ func waitForSnapshot(results <-chan poller.Snapshot) tea.Cmd {
 	}
 }
 
-// Init is called once when the program starts. Returning
-// waitForSnapshot here is what kicks off listening for the first
-// snapshot — without this, Update would never receive one.
+// Init is called once when the program starts.
 func (m Model) Init() tea.Cmd {
 	return waitForSnapshot(m.results)
 }
@@ -77,16 +85,59 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case snapshotMsg:
 		m.pollCount++
-		if msg.Err != nil {
+
+		if msg.InfoErr != nil {
 			m.connected = false
-			m.lastErr = msg.Err
+			m.lastErr = msg.InfoErr
 		} else {
 			m.connected = true
 			m.lastErr = nil
 			info := redis.ParseInfo(msg.Info)
 			m.memory = metrics.ParseMemory(info)
 			m.ops = metrics.ParseOps(info)
+			m.clients = metrics.ParseClients(info)
 		}
+
+		// Clients panel (CLIENT LIST) is independent of INFO's success —
+		// an ACL restricting one command shouldn't blank out a panel
+		// that only needed the other.
+		if msg.ClientListErr != nil {
+			m.clientListErr = msg.ClientListErr
+		} else {
+			m.clientListErr = nil
+			records := metrics.ParseClientList(msg.ClientListRaw)
+			m.longIdleClients = metrics.LongIdleClients(records)
+		}
+
+		// Slowlog panel. The first successful poll is treated as a
+		// baseline, not a flood of "new" entries — a slowlog can
+		// legitimately already contain entries from before Rekon
+		// started watching, and marking all of them "new" on startup
+		// would be misleading (implying they just happened). Only
+		// entries appearing from the *second* successful poll onward,
+		// with IDs higher than what the baseline already saw, count
+		// as new.
+		if msg.SlowlogErr != nil {
+			m.slowlogErr = msg.SlowlogErr
+		} else {
+			m.slowlogErr = nil
+			m.allSlowlogEntries = msg.SlowlogEntries
+
+			if !m.slowlogHasBaseline {
+				_, maxID := metrics.NewEntriesSince(msg.SlowlogEntries, 0)
+				m.slowlogLastSeenID = maxID
+				m.slowlogHasBaseline = true
+				m.newSlowlogIDs = map[int64]bool{}
+			} else {
+				newEntries, maxID := metrics.NewEntriesSince(msg.SlowlogEntries, m.slowlogLastSeenID)
+				m.slowlogLastSeenID = maxID
+				m.newSlowlogIDs = make(map[int64]bool, len(newEntries))
+				for _, e := range newEntries {
+					m.newSlowlogIDs[e.ID] = true
+				}
+			}
+		}
+
 		// Keep listening for the next snapshot — see waitForSnapshot's
 		// doc comment for why this re-issue is required every time.
 		return m, waitForSnapshot(m.results)
@@ -107,7 +158,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // Panel styling. Colors are chosen per metrics.Status so the same
 // threshold judgment computed in internal/metrics drives what the user
 // sees — the View layer never re-decides what's concerning, it only
-// renders the decision metrics.go already made.
+// renders the decision.
 var (
 	panelBorder = lipgloss.RoundedBorder()
 
@@ -119,7 +170,9 @@ var (
 		metrics.StatusInsufficientData: lipgloss.Color("240"), // grey, same as unknown — neither is an alarm color
 	}
 
-	titleStyle = lipgloss.NewStyle().Bold(true)
+	titleStyle  = lipgloss.NewStyle().Bold(true)
+	newTagStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	dimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 )
 
 func panelStyle(status metrics.Status) lipgloss.Style {
@@ -139,13 +192,11 @@ func (m Model) View() string {
 		return "rekon\n\nwaiting for first poll...\n\npress q to quit\n"
 	}
 
-	memPanel := m.renderMemoryPanel()
-	opsPanel := m.renderOpsPanel()
+	topRow := lipgloss.JoinHorizontal(lipgloss.Top, m.renderMemoryPanel(), m.renderOpsPanel())
+	bottomRow := lipgloss.JoinHorizontal(lipgloss.Top, m.renderClientsPanel(), m.renderSlowlogPanel())
 
-	row := lipgloss.JoinHorizontal(lipgloss.Top, memPanel, opsPanel)
-
-	return fmt.Sprintf("%s\n\n%s\n\npolls received: %d — press q to quit\n",
-		titleStyle.Render("rekon"), row, m.pollCount)
+	return fmt.Sprintf("%s\n\n%s\n\n%s\n\npolls received: %d — press q to quit\n",
+		titleStyle.Render("rekon"), topRow, bottomRow, m.pollCount)
 }
 
 func (m Model) renderMemoryPanel() string {
@@ -179,6 +230,66 @@ func (m Model) renderOpsPanel() string {
 		m.ops.OpsPerSec, ratioText, m.ops.KeyspaceHits, m.ops.KeyspaceMisses,
 	)
 	return panelStyle(status).Render(content)
+}
+
+func (m Model) renderClientsPanel() string {
+	if m.clientListErr != nil {
+		content := fmt.Sprintf("Clients\nunavailable: %v", m.clientListErr)
+		return panelStyle(metrics.StatusUnknown).Render(content)
+	}
+
+	status := metrics.StatusOK
+	if len(m.longIdleClients) > 0 {
+		status = metrics.StatusWarn
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Clients\nconnected: %d  blocked: %d\n", m.clients.Connected, m.clients.Blocked)
+	if len(m.longIdleClients) == 0 {
+		b.WriteString(dimStyle.Render("no long-idle connections"))
+	} else {
+		fmt.Fprintf(&b, "long-idle (>%ds):", metrics.LongIdleThresholdSeconds)
+		for _, c := range m.longIdleClients {
+			fmt.Fprintf(&b, "\n  %s idle=%ds", c.Addr, c.IdleSeconds)
+		}
+	}
+
+	return panelStyle(status).Render(b.String())
+}
+
+func (m Model) renderSlowlogPanel() string {
+	if m.slowlogErr != nil {
+		content := fmt.Sprintf("Slowlog\nunavailable: %v", m.slowlogErr)
+		return panelStyle(metrics.StatusUnknown).Render(content)
+	}
+
+	status := metrics.StatusOK
+	if len(m.newSlowlogIDs) > 0 {
+		status = metrics.StatusWarn
+	}
+
+	var b strings.Builder
+	b.WriteString("Slowlog\n")
+	if len(m.allSlowlogEntries) == 0 {
+		b.WriteString(dimStyle.Render("no entries"))
+	} else {
+		// Show at most the 5 most recent entries — Redis returns
+		// newest-first already, so no re-sorting is needed.
+		limit := 5
+		if len(m.allSlowlogEntries) < limit {
+			limit = len(m.allSlowlogEntries)
+		}
+		for i := 0; i < limit; i++ {
+			e := m.allSlowlogEntries[i]
+			tag := ""
+			if m.newSlowlogIDs[e.ID] {
+				tag = " " + newTagStyle.Render("NEW")
+			}
+			fmt.Fprintf(&b, "\n%dus %s%s", e.DurationMicros, strings.Join(e.Args, " "), tag)
+		}
+	}
+
+	return panelStyle(status).Render(b.String())
 }
 
 func valueOr(s, fallback string) string {
