@@ -11,7 +11,6 @@ import (
 	"bufio"
 	"fmt"
 	"net"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -65,68 +64,27 @@ func (c *Client) sendCommand(args ...string) error {
 	return nil
 }
 
-// readBulkString reads a single RESP bulk-string reply, of the form:
-//
-//	$<byte-length>\r\n<payload>\r\n
-//
-// This is the reply type INFO returns. Other RESP types (simple strings,
-// errors, integers, arrays) exist but aren't needed until later panels
-// (e.g. SLOWLOG returns an array) — deliberately not handled yet, so this
-// stays a small, explainable first piece.
-func (c *Client) readBulkString() (string, error) {
-	line, err := c.reader.ReadString('\n')
-	if err != nil {
-		return "", fmt.Errorf("reading reply header: %w", err)
+// call sends a command and reads back exactly one RESP value — the
+// generic building block Info, SlowlogGet, and ClientList are all built
+// on top of, instead of each hand-rolling their own read logic.
+func (c *Client) call(args ...string) (Value, error) {
+	if err := c.sendCommand(args...); err != nil {
+		return Value{}, err
 	}
-	line = strings.TrimRight(line, "\r\n")
-
-	if len(line) == 0 || line[0] != '$' {
-		return "", fmt.Errorf("unexpected reply type, want bulk string ($), got: %q", line)
-	}
-
-	length, err := strconv.Atoi(line[1:])
-	if err != nil {
-		return "", fmt.Errorf("parsing bulk string length from %q: %w", line, err)
-	}
-	if length < 0 {
-		// $-1 is RESP's "nil" bulk string — not expected for INFO, but
-		// worth naming explicitly rather than silently mishandling it.
-		return "", fmt.Errorf("received nil bulk string reply")
-	}
-
-	// Read exactly `length` bytes of payload, then the trailing \r\n.
-	payload := make([]byte, length)
-	if _, err := readFull(c.reader, payload); err != nil {
-		return "", fmt.Errorf("reading bulk string payload: %w", err)
-	}
-	if _, err := c.reader.Discard(2); err != nil { // trailing \r\n
-		return "", fmt.Errorf("reading trailing CRLF: %w", err)
-	}
-
-	return string(payload), nil
-}
-
-// readFull reads exactly len(buf) bytes, looping if a single Read
-// returns fewer bytes than requested (which bufio.Reader can do).
-func readFull(r *bufio.Reader, buf []byte) (int, error) {
-	total := 0
-	for total < len(buf) {
-		n, err := r.Read(buf[total:])
-		total += n
-		if err != nil {
-			return total, err
-		}
-	}
-	return total, nil
+	return readValue(c.reader)
 }
 
 // Info sends the INFO command and returns Redis's raw text reply.
-// Parsing that text into structured fields is deliberately a separate,
-// later concern (Sprint 3) — this function's only job is proving the
-// protocol round-trip works.
+// Parsing that text into structured fields is a separate concern
+// (see package metrics) — this function's only job is the protocol
+// round-trip and confirming the reply was actually a bulk string.
 func (c *Client) Info() (string, error) {
-	if err := c.sendCommand("INFO"); err != nil {
+	v, err := c.call("INFO")
+	if err != nil {
 		return "", err
 	}
-	return c.readBulkString()
+	if v.Type != TypeBulkString {
+		return "", fmt.Errorf("INFO: expected bulk string reply, got type %v", v.Type)
+	}
+	return v.Str, nil
 }
