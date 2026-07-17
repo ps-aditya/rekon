@@ -90,7 +90,13 @@ initially just swallowed rather than surfaced distinctly per-metric)*
   Redis instance could display an alarming-looking warn/critical color
   that doesn't reflect an actual problem, undermining user trust in the
   tool's signal.
-- **Status:** open.
+- **Status:** paid down — added `StatusInsufficientData`, gated on
+  `MinMeaningfulMemoryBytes` (5MiB, documented as a pragmatic default).
+  Below the floor, the panel shows an explicit "not enough data to
+  judge" label with a neutral grey border instead of a misleading
+  warn/critical color. Verified against the exact real scenario that
+  surfaced this (ratio 11.78 @ 650KB used_memory) both in a unit test
+  and visually under a faked pty.
 
 ## UI / rendering
 *(none yet — log here if e.g. panel layout is hardcoded for one terminal
