@@ -112,10 +112,11 @@ var (
 	panelBorder = lipgloss.RoundedBorder()
 
 	statusColor = map[metrics.Status]lipgloss.Color{
-		metrics.StatusOK:       lipgloss.Color("42"),  // green
-		metrics.StatusWarn:     lipgloss.Color("214"), // orange
-		metrics.StatusCritical: lipgloss.Color("196"), // red
-		metrics.StatusUnknown:  lipgloss.Color("240"), // grey
+		metrics.StatusOK:               lipgloss.Color("42"),  // green
+		metrics.StatusWarn:             lipgloss.Color("214"), // orange
+		metrics.StatusCritical:         lipgloss.Color("196"), // red
+		metrics.StatusUnknown:          lipgloss.Color("240"), // grey
+		metrics.StatusInsufficientData: lipgloss.Color("240"), // grey, same as unknown — neither is an alarm color
 	}
 
 	titleStyle = lipgloss.NewStyle().Bold(true)
@@ -149,10 +150,17 @@ func (m Model) View() string {
 
 func (m Model) renderMemoryPanel() string {
 	status := m.memory.FragmentationStatus()
+
+	ratioText := fmt.Sprintf("%.2f", m.memory.FragmentationRatio)
+	if status == metrics.StatusInsufficientData {
+		ratioText = fmt.Sprintf("%.2f (not enough data to judge, <%dMB used)",
+			m.memory.FragmentationRatio, metrics.MinMeaningfulMemoryBytes/(1024*1024))
+	}
+
 	content := fmt.Sprintf(
-		"Memory\nused: %d bytes\nfragmentation ratio: %.2f\nmaxmemory policy: %s\nevicted keys: %d",
+		"Memory\nused: %d bytes\nfragmentation ratio: %s\nmaxmemory policy: %s\nevicted keys: %d",
 		m.memory.UsedMemoryBytes,
-		m.memory.FragmentationRatio,
+		ratioText,
 		valueOr(m.memory.MaxMemoryPolicy, "unknown"),
 		m.memory.EvictedKeys,
 	)
