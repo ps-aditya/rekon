@@ -9,6 +9,7 @@
 package poller
 
 import (
+	"sync"
 	"time"
 
 	"github.com/rekon/rekon/internal/redis"
@@ -46,6 +47,7 @@ type Poller struct {
 	interval time.Duration
 	Results  chan Snapshot
 	stop     chan struct{}
+	stopOnce sync.Once
 }
 
 // New creates a Poller against an already-connected client. Connection
@@ -86,18 +88,38 @@ func (p *Poller) Start() {
 // connection can only have one command in flight at a time regardless)
 // and returns a Snapshot with each command's result and error tracked
 // independently.
+//
+// If INFO fails — the strongest signal something is wrong with the
+// connection itself, as opposed to e.g. an ACL restricting one specific
+// command — pollOnce attempts a reconnect before returning. This is a
+// best-effort recovery for the *next* poll, not a retry of the current
+// one: the current Snapshot still reports the failure that happened,
+// so the UI shows an honest "this poll failed" rather than silently
+// hiding it behind a retry.
 func (p *Poller) pollOnce() Snapshot {
 	snap := Snapshot{Timestamp: time.Now()}
 	snap.Info, snap.InfoErr = p.client.Info()
+
+	if snap.InfoErr != nil {
+		// Best-effort; if this also fails, the next poll's InfoErr
+		// will simply report the same underlying problem again — no
+		// special handling needed here beyond not crashing.
+		_ = p.client.Reconnect()
+	}
+
 	snap.ClientListRaw, snap.ClientListErr = p.client.ClientList()
 	snap.SlowlogEntries, snap.SlowlogErr = p.client.SlowlogGet(slowlogFetchCount)
 	return snap
 }
 
-// Stop signals the polling goroutine to exit and close Results. Safe to
-// call once; calling it twice will panic on the closed stop channel —
-// see TECHNICAL_DEBT.md for why this is an accepted limitation while
-// there's a single call site.
+// Stop signals the polling goroutine to exit and close Results.
+// Guarded with sync.Once so a second call is a harmless no-op instead
+// of panicking on an already-closed channel — see TECHNICAL_DEBT.md's
+// Sprint 1 entry: this was accepted debt while there was only one call
+// site, and Sprint 6 adds more (e.g. shutdown on connection-closed vs.
+// user-quit), so it's fixed now rather than left as a latent bug.
 func (p *Poller) Stop() {
-	close(p.stop)
+	p.stopOnce.Do(func() {
+		close(p.stop)
+	})
 }
