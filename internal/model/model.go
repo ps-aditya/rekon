@@ -195,7 +195,7 @@ func panelStyle(status metrics.Status) lipgloss.Style {
 // View renders the current Model to text.
 func (m Model) View() string {
 	if m.lastErr != nil {
-		return fmt.Sprintf("rekon\n\nconnection error: %v\n\npress q to quit\n", m.lastErr)
+		return fmt.Sprintf("rekon\n\nconnection error: %v\nretrying automatically...\n\npress q to quit\n", m.lastErr)
 	}
 	if !m.connected {
 		return "rekon\n\nwaiting for first poll...\n\npress q to quit\n"
