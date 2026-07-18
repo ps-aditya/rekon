@@ -19,6 +19,7 @@ import (
 type Client struct {
 	conn   net.Conn
 	reader *bufio.Reader
+	addr   string // remembered for Reconnect
 }
 
 // Connect opens a TCP connection to addr (e.g. "localhost:6379").
@@ -32,7 +33,35 @@ func Connect(addr string) (*Client, error) {
 	return &Client{
 		conn:   conn,
 		reader: bufio.NewReader(conn),
+		addr:   addr,
 	}, nil
+}
+
+// LocalAddr returns this connection's local address as a string (e.g.
+// "127.0.0.1:54012") — the same address Redis's own CLIENT LIST and
+// SLOWLOG entries will report for commands issued over this
+// connection, since Redis records the connecting side's address as it
+// sees it. Used to distinguish Rekon's own traffic from a real client's
+// traffic when watching CLIENT LIST/SLOWLOG for other activity — see
+// TECHNICAL_DEBT.md's Sprint 4 entry on self-polling noise.
+func (c *Client) LocalAddr() string {
+	return c.conn.LocalAddr().String()
+}
+
+// Reconnect closes the current connection (if any) and redials the
+// original address, replacing conn and reader. Used to recover after a
+// poll fails due to a dropped connection — see poller.go's pollOnce.
+func (c *Client) Reconnect() error {
+	if c.conn != nil {
+		c.conn.Close() // best-effort; the connection is already presumed broken
+	}
+	conn, err := net.DialTimeout("tcp", c.addr, 5*time.Second)
+	if err != nil {
+		return fmt.Errorf("reconnecting to redis at %s: %w", c.addr, err)
+	}
+	c.conn = conn
+	c.reader = bufio.NewReader(conn)
+	return nil
 }
 
 // Close closes the underlying connection.
