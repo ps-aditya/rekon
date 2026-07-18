@@ -32,6 +32,7 @@ type closedMsg struct{}
 // same "new row, not an edited row" idea we discussed for SQL UPDATE.
 type Model struct {
 	results   <-chan poller.Snapshot
+	selfAddr  string
 	connected bool
 	lastErr   error
 	pollCount int
@@ -52,10 +53,14 @@ type Model struct {
 	slowlogErr         error
 }
 
-// New creates a Model that will listen on results for incoming snapshots.
-func New(results <-chan poller.Snapshot) Model {
+// New creates a Model that will listen on results for incoming
+// snapshots. selfAddr is Rekon's own connection's local address (from
+// redis.Client.LocalAddr()), used to filter Rekon's own polling
+// commands out of the Slowlog panel — see metrics.FilterOutSelf.
+func New(results <-chan poller.Snapshot, selfAddr string) Model {
 	return Model{
-		results: results,
+		results:  results,
+		selfAddr: selfAddr,
 	}
 }
 
@@ -125,15 +130,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.slowlogErr = msg.SlowlogErr
 		} else {
 			m.slowlogErr = nil
-			m.allSlowlogEntries = msg.SlowlogEntries
+			m.allSlowlogEntries = metrics.FilterOutSelf(msg.SlowlogEntries, m.selfAddr)
 
 			if !m.slowlogHasBaseline {
-				_, maxID := metrics.NewEntriesSince(msg.SlowlogEntries, 0)
+				_, maxID := metrics.NewEntriesSince(m.allSlowlogEntries, 0)
 				m.slowlogLastSeenID = maxID
 				m.slowlogHasBaseline = true
 				m.newSlowlogIDs = map[int64]bool{}
 			} else {
-				newEntries, maxID := metrics.NewEntriesSince(msg.SlowlogEntries, m.slowlogLastSeenID)
+				newEntries, maxID := metrics.NewEntriesSince(m.allSlowlogEntries, m.slowlogLastSeenID)
 				m.slowlogLastSeenID = maxID
 				m.newSlowlogIDs = make(map[int64]bool, len(newEntries))
 				for _, e := range newEntries {
