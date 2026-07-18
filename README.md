@@ -44,7 +44,7 @@ Requires: network access to a Redis instance you're allowed to run
 ## Quickstart
 
 ```bash
-rekon --url redis://localhost:6379
+rekon --url localhost:6379
 ```
 
 Connects, starts polling every 1s (configurable), and opens the dashboard.
@@ -54,8 +54,8 @@ Press `q` to quit.
 
 | Flag | Default | Description |
 |---|---|---|
-| `--url` | `redis://localhost:6379` | Redis connection string |
-| `--interval` | `1s` | Poll interval |
+| `--url` | `localhost:6379` | Redis address, as `host:port` (no scheme prefix) |
+| `--interval` | `1s` | Poll interval, Go duration syntax (e.g. `500ms`, `2s`) |
 
 ## What you'll see
 

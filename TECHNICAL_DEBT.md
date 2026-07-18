@@ -91,7 +91,13 @@ the reasoning from scratch.
   deferred rather than blocking, but should be fixed before v1 ships
   since "own noise contaminating the watched instance's data" undercuts
   user trust in the panel's signal.
-- **Status:** open.
+- **Status:** paid down (Sprint 6) — `metrics.FilterOutSelf` filters by
+  `ClientAddr` matching Rekon's own connection's `LocalAddr()`, not by
+  command name (filtering by name would hide a real other client
+  issuing the same commands). Verified against the exact real scenario
+  that surfaced the bug (`slowlog-log-slower-than 0`): confirmed
+  Rekon's own commands no longer appear while a real simulated user
+  command still shows up correctly tagged NEW.
 
 ## Parsing / data modeling
 
