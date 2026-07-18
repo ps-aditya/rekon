@@ -36,9 +36,11 @@ type Model struct {
 	lastErr   error
 	pollCount int
 
-	memory  metrics.Memory
-	ops     metrics.Ops
-	clients metrics.Clients
+	memory      metrics.Memory
+	ops         metrics.Ops
+	clients     metrics.Clients
+	replication metrics.Replication
+	persistence metrics.Persistence
 
 	longIdleClients []metrics.ClientRecord
 	clientListErr   error
@@ -96,6 +98,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.memory = metrics.ParseMemory(info)
 			m.ops = metrics.ParseOps(info)
 			m.clients = metrics.ParseClients(info)
+			m.replication = metrics.ParseReplication(info)
+			m.persistence = metrics.ParsePersistence(info)
 		}
 
 		// Clients panel (CLIENT LIST) is independent of INFO's success —
@@ -193,10 +197,11 @@ func (m Model) View() string {
 	}
 
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, m.renderMemoryPanel(), m.renderOpsPanel())
-	bottomRow := lipgloss.JoinHorizontal(lipgloss.Top, m.renderClientsPanel(), m.renderSlowlogPanel())
+	midRow := lipgloss.JoinHorizontal(lipgloss.Top, m.renderClientsPanel(), m.renderSlowlogPanel())
+	bottomRow := lipgloss.JoinHorizontal(lipgloss.Top, m.renderReplicationPanel(), m.renderPersistencePanel())
 
-	return fmt.Sprintf("%s\n\n%s\n\n%s\n\npolls received: %d — press q to quit\n",
-		titleStyle.Render("rekon"), topRow, bottomRow, m.pollCount)
+	return fmt.Sprintf("%s\n\n%s\n\n%s\n\n%s\n\npolls received: %d — press q to quit\n",
+		titleStyle.Render("rekon"), topRow, midRow, bottomRow, m.pollCount)
 }
 
 func (m Model) renderMemoryPanel() string {
@@ -290,6 +295,58 @@ func (m Model) renderSlowlogPanel() string {
 	}
 
 	return panelStyle(status).Render(b.String())
+}
+
+func (m Model) renderReplicationPanel() string {
+	r := m.replication
+
+	if r.IsReplica() {
+		status := r.ReplicaLinkStatus()
+		lastIO := "unknown"
+		if r.MasterLastIOSecondsAgo >= 0 {
+			lastIO = fmt.Sprintf("%ds ago", r.MasterLastIOSecondsAgo)
+		}
+		content := fmt.Sprintf(
+			"Replication\nrole: replica of %s:%s\nlink status: %s\nlast I/O: %s",
+			valueOr(r.MasterHost, "unknown"), valueOr(r.MasterPort, "unknown"),
+			valueOr(r.MasterLinkStatus, "unknown"), lastIO,
+		)
+		return panelStyle(status).Render(content)
+	}
+
+	// Master (which also covers a standalone instance with zero
+	// connected replicas — Redis has no separate "standalone" role).
+	var b strings.Builder
+	fmt.Fprintf(&b, "Replication\nrole: master\nconnected replicas: %d", r.ConnectedSlaves)
+	for _, s := range r.Slaves {
+		fmt.Fprintf(&b, "\n  %s:%s state=%s lag=%ds", s.IP, s.Port, s.State, s.Lag)
+	}
+	return panelStyle(metrics.StatusOK).Render(b.String())
+}
+
+func (m Model) renderPersistencePanel() string {
+	p := m.persistence
+	status := p.Status()
+
+	aofLine := "disabled"
+	if p.AOFEnabled {
+		aofLine = fmt.Sprintf("enabled (last write: %s)", valueOr(p.AOFLastWriteStatus, "unknown"))
+	}
+
+	inProgress := ""
+	if p.RDBBGSaveInProgress {
+		inProgress = " (save in progress)"
+	}
+	if p.AOFRewriteInProgress {
+		inProgress += " (AOF rewrite in progress)"
+	}
+
+	content := fmt.Sprintf(
+		"Persistence\nRDB last save status: %s%s\nchanges since last save: %d\nAOF: %s",
+		valueOr(p.RDBLastBGSaveStatus, "unknown"), inProgress,
+		p.RDBChangesSinceLastSave, aofLine,
+	)
+	return panelStyle(status).Render(content)
 }
 
 func valueOr(s, fallback string) string {
