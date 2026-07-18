@@ -33,8 +33,19 @@ persistence status — live, in one screen, in your terminal.
 
 ## Install
 
+Once this repo is pushed to GitHub, clone and build it directly — this
+works today, no publishing step required:
+
 ```bash
-# Coming once packaged — placeholder until Sprint 6
+git clone https://github.com/<your-username>/rekon.git
+cd rekon
+go build -o rekon ./cmd/rekon
+./rekon --url localhost:6379
+```
+
+Once a release is tagged, `go install` will also work directly:
+
+```bash
 go install github.com/<your-username>/rekon@latest
 ```
 
