@@ -96,11 +96,28 @@ func (c *Client) sendCommand(args ...string) error {
 // call sends a command and reads back exactly one RESP value — the
 // generic building block Info, SlowlogGet, and ClientList are all built
 // on top of, instead of each hand-rolling their own read logic.
+// call sends a command and reads back exactly one RESP value — the
+// generic building block Info, SlowlogGet, and ClientList are all built
+// on top of, instead of each hand-rolling their own read logic.
+//
+// If Redis replies with a RESP Error (e.g. a NOPERM from an ACL
+// restriction), that error's actual message is returned directly —
+// callers checking for a specific expected type (bulk string, array)
+// don't need to separately handle the Error case themselves; they'd
+// otherwise end up reporting a confusing "expected X, got type Error"
+// instead of the genuinely useful message Redis provided.
 func (c *Client) call(args ...string) (Value, error) {
 	if err := c.sendCommand(args...); err != nil {
 		return Value{}, err
 	}
-	return readValue(c.reader)
+	v, err := readValue(c.reader)
+	if err != nil {
+		return Value{}, err
+	}
+	if v.Type == TypeError {
+		return Value{}, fmt.Errorf("redis error: %s", v.Str)
+	}
+	return v, nil
 }
 
 // Info sends the INFO command and returns Redis's raw text reply.

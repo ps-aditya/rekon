@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"net"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -85,6 +86,23 @@ func TestSlowlogGet_WrongReplyTypeErrors(t *testing.T) {
 	_, err := client.SlowlogGet(10)
 	if err == nil {
 		t.Fatal("expected an error for a non-array reply, got nil")
+	}
+}
+
+func TestSlowlogGet_SurfacesRealACLErrorMessage(t *testing.T) {
+	// The exact RESP Error shape observed when testing against a real
+	// Redis instance with SLOWLOG restricted via ACL SETUSER default
+	// -slowlog: a '-' prefixed error line, not an array or bulk string.
+	response := "-NOPERM this user has no permissions to run the 'slowlog|get' command\r\n"
+	client := newPipedClient(t, response)
+
+	_, err := client.SlowlogGet(10)
+	if err == nil {
+		t.Fatal("expected an error for a NOPERM reply, got nil")
+	}
+	if !strings.Contains(err.Error(), "NOPERM") {
+		t.Errorf("error message %q doesn't surface Redis's actual NOPERM message — "+
+			"a user seeing this should see *why* it failed, not a generic type mismatch", err.Error())
 	}
 }
 
