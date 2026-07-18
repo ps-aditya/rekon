@@ -60,13 +60,15 @@ Press `q` to quit.
 ## What you'll see
 
 - **Memory** — used memory, fragmentation ratio, maxmemory + eviction
-  policy, eviction rate
+  policy, evicted key count
 - **Ops** — instantaneous ops/sec, keyspace hit/miss ratio
 - **Clients** — connected count, blocked count, long-idle connections
 - **Slowlog** — live tail, new entries highlighted since last poll
-- **Replication** — role, replica count, lag (degrades gracefully on a
-  standalone instance — no broken/empty section, it just doesn't appear)
-- **Persistence** — last save time, RDB/AOF status, save-in-progress flag
+- **Replication** — role, connected replica count and per-replica lag
+  (always shown; a standalone instance just shows 0 connected replicas
+  rather than an error or blank panel)
+- **Persistence** — time since last RDB save, RDB/AOF status,
+  save-in-progress flag
 
 ## Roadmap
 
