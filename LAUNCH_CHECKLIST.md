@@ -6,22 +6,22 @@ Roadmap's sprint sequencing — Roadmap is "how we get there," this is
 "how we know we've arrived."
 
 ## Functional correctness
-- [ ] Connects to a real local Redis instance via `--url`
+- [x] Connects to a real local Redis instance via `--url`
 - [ ] Connects to a real remote Redis instance (not just localhost)
-- [ ] All six v1 panels render live, correct data (Memory, Ops, Clients,
+- [x] All six v1 panels render live, correct data (Memory, Ops, Clients,
       Slowlog, Replication, Persistence)
-- [ ] Replication panel correctly degrades on a standalone instance (no
+- [x] Replication panel correctly degrades on a standalone instance (no
       broken/empty section)
-- [ ] Slowlog panel correctly identifies *new* entries since last poll, not
+- [x] Slowlog panel correctly identifies *new* entries since last poll, not
       just re-showing the same entries every refresh
-- [ ] No mutating/write Redis command is ever issued — verify by reviewing
+- [x] No mutating/write Redis command is ever issued — verify by reviewing
       every command call site, not by assumption
-- [ ] Handles Redis disconnecting mid-run without crashing (shows a clear
+- [x] Handles Redis disconnecting mid-run without crashing (shows a clear
       "disconnected, retrying" state)
 - [ ] Handles a permission-restricted Redis (ACL blocks one of `INFO`/
       `SLOWLOG GET`/`CLIENT LIST`) by showing that one metric as
       unavailable, not crashing the whole program
-- [ ] `q` quits cleanly, no orphaned goroutines or hung terminal state
+- [x] `q` quits cleanly, no orphaned goroutines or hung terminal state
 
 ## Performance
 - [ ] Poll interval is honored accurately (not drifting significantly over
@@ -34,25 +34,25 @@ Roadmap's sprint sequencing — Roadmap is "how we get there," this is
       leak from the polling loop or channel handling)
 
 ## Packaging / distribution
-- [ ] Builds a single static binary with no runtime dependency
-- [ ] Tested by actually installing fresh (not `go run` from inside the
+- [x] Builds a single static binary with no runtime dependency
+- [x] Tested by actually installing fresh (not `go run` from inside the
       dev repo) — simulate what a stranger would experience
 - [ ] `go install` path works, or a documented binary download works
 - [ ] README's install instructions are copy-paste-run accurate, verified
       by literally following them from scratch
 
 ## Documentation
-- [ ] README accurately describes only what v1 actually does — no
+- [x] README accurately describes only what v1 actually does — no
       aspirational claims about export/replay or AI features that don't
       exist yet
 - [ ] Demo GIF is a real recording of real output (not a mockup)
-- [ ] `--help` output is accurate and matches README's flag table
+- [x] `--help` output is accurate and matches README's flag table
 
 ## Distribution readiness (per the "distribution built in parallel" philosophy)
 - [ ] GitHub repo Topics set (e.g., `redis`, `tui`, `cli`, `golang`,
       `monitoring`, `devtools`)
 - [ ] GitHub Discussions enabled
-- [ ] License file present and correct (Apache 2.0)
+- [x] License file present and correct (Apache 2.0)
 - [ ] Considered submission to relevant niche directories (Terminal Trove,
       Console.dev) once README/demo are real, not before
 - [ ] Show HN / Product Hunt post drafted in advance, following the pattern
@@ -61,7 +61,7 @@ Roadmap's sprint sequencing — Roadmap is "how we get there," this is
       what v1 actually does
 
 ## The understanding bar (per CONSTITUTION.md Success Metric — this is not optional)
-- [ ] Can explain, unprompted, why the polling goroutine + channel design
+- [x] Can explain, unprompted, why the polling goroutine + channel design
       prevents UI freezing — in your own words, without re-reading
       Architecture.md
 - [ ] Can explain what each panel's underlying Redis command actually
