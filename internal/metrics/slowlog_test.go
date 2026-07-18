@@ -6,6 +6,49 @@ import (
 	"github.com/rekon/rekon/internal/redis"
 )
 
+func TestFilterOutSelf_RemovesMatchingAddr(t *testing.T) {
+	entries := []redis.SlowlogEntry{
+		{ID: 1, ClientAddr: "127.0.0.1:11111", Args: []string{"info"}},
+		{ID: 2, ClientAddr: "127.0.0.1:22222", Args: []string{"set", "foo", "bar"}},
+		{ID: 3, ClientAddr: "127.0.0.1:11111", Args: []string{"slowlog", "get", "25"}},
+	}
+
+	got := FilterOutSelf(entries, "127.0.0.1:11111")
+
+	if len(got) != 1 {
+		t.Fatalf("got %d entries, want 1", len(got))
+	}
+	if got[0].ID != 2 {
+		t.Errorf("got entry ID %d, want 2 (the non-self entry)", got[0].ID)
+	}
+}
+
+func TestFilterOutSelf_EmptySelfAddrFiltersNothing(t *testing.T) {
+	entries := []redis.SlowlogEntry{
+		{ID: 1, ClientAddr: ""},
+		{ID: 2, ClientAddr: "127.0.0.1:1"},
+	}
+
+	got := FilterOutSelf(entries, "")
+
+	if len(got) != 2 {
+		t.Errorf("got %d entries with empty selfAddr, want 2 (nothing filtered)", len(got))
+	}
+}
+
+func TestFilterOutSelf_NoMatchesLeavesEverything(t *testing.T) {
+	entries := []redis.SlowlogEntry{
+		{ID: 1, ClientAddr: "127.0.0.1:1"},
+		{ID: 2, ClientAddr: "127.0.0.1:2"},
+	}
+
+	got := FilterOutSelf(entries, "127.0.0.1:9999")
+
+	if len(got) != 2 {
+		t.Errorf("got %d entries, want 2 (selfAddr matched nothing)", len(got))
+	}
+}
+
 func TestNewEntriesSince_NoPriorEntries(t *testing.T) {
 	// lastSeenID=0 with real entries present — this is the "first ever
 	// poll" shape from NewEntriesSince's own perspective. Whether the
