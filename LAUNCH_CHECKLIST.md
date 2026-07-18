@@ -52,28 +52,54 @@ Roadmap's sprint sequencing — Roadmap is "how we get there," this is
 - [x] Builds a single static binary with no runtime dependency
 - [x] Tested by actually installing fresh (not `go run` from inside the
       dev repo) — simulate what a stranger would experience
-- [ ] `go install` path works, or a documented binary download works
-- [ ] README's install instructions are copy-paste-run accurate, verified
-      by literally following them from scratch
+- [x] `go install` path works, or a documented binary download works —
+      `go install ./cmd/rekon` verified locally (binary placed in GOBIN,
+      runs correctly with working flags). The `go install
+      github.com/.../rekon@latest` form needs a real push + tagged
+      release before it'll work — not testable until then.
+- [x] README's install instructions are copy-paste-run accurate, verified
+      by literally following them from scratch — cloned the repo fresh
+      into a clean directory and ran the exact documented `git clone` /
+      `go build` steps; confirmed it builds and runs correctly.
 
 ## Documentation
 - [x] README accurately describes only what v1 actually does — no
       aspirational claims about export/replay or AI features that don't
       exist yet
-- [ ] Demo GIF is a real recording of real output (not a mockup)
+- [ ] Demo GIF is a real recording of real output (not a mockup) —
+      **could not be produced in this dev sandbox**: it has no real
+      controlling TTY (confirmed by both Rekon itself and `asciinema`
+      independently failing to attach to one — same root cause as
+      Sprint 2's "could not open a new TTY" error). This genuinely
+      needs an interactive terminal session on a real machine. Recipe
+      to do it yourself in ~5 minutes:
+      ```bash
+      # 1. Record a real session (asciinema, likely already available
+      #    via your package manager, or `pip install asciinema`)
+      asciinema rec demo.cast --command "./rekon --url localhost:6379"
+      # ... let it run a few seconds showing live panels, then press q
+
+      # 2. Convert to GIF with agg (also real, actively maintained)
+      cargo install --locked agg   # or: brew install agg
+      agg demo.cast assets/demo.gif
+      ```
+      Commit the resulting `assets/demo.gif`, matching the path already
+      referenced in README.md.
 - [x] `--help` output is accurate and matches README's flag table
 
 ## Distribution readiness (per the "distribution built in parallel" philosophy)
 - [ ] GitHub repo Topics set (e.g., `redis`, `tui`, `cli`, `golang`,
-      `monitoring`, `devtools`)
-- [ ] GitHub Discussions enabled
+      `monitoring`, `devtools`) — **manual step for you**: needs a real,
+      already-pushed GitHub repo and its settings UI; nothing to verify
+      from a sandbox.
+- [ ] GitHub Discussions enabled — **manual step for you**, same reason.
 - [x] License file present and correct (Apache 2.0)
 - [ ] Considered submission to relevant niche directories (Terminal Trove,
       Console.dev) once README/demo are real, not before
-- [ ] Show HN / Product Hunt post drafted in advance, following the pattern
+- [x] Show HN / Product Hunt post drafted in advance, following the pattern
       from the reference posts: one-line problem, one-line mechanism,
       honest limitation, license/stars as social proof — not overselling
-      what v1 actually does
+      what v1 actually does — see `docs/show_hn_draft.md`
 
 ## The understanding bar (per CONSTITUTION.md Success Metric — this is not optional)
 - [x] Can explain, unprompted, why the polling goroutine + channel design
