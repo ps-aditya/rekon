@@ -1,11 +1,10 @@
-// Sprint 2 entrypoint. Replaces Sprint 1's manual stdin-reading loop
-// with bubbletea's program runner, which owns terminal input/output and
-// the Model/Update/View lifecycle. This is the first point where Rekon
-// gets real (if unstyled) raw-mode keypress handling for free, resolving
-// the "q + Enter" simplification logged in TECHNICAL_DEBT.md for Sprint 1.
+// Rekon's entrypoint. Parses connection flags, connects, starts the
+// poller, and hands off to bubbletea's program runner, which owns
+// terminal input/output and the Model/Update/View lifecycle.
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"time"
@@ -17,18 +16,27 @@ import (
 )
 
 func main() {
-	client, err := redis.Connect("localhost:6379")
+	url := flag.String("url", "localhost:6379", "Redis address to connect to (host:port)")
+	interval := flag.Duration("interval", 1*time.Second, "poll interval, e.g. 1s, 500ms")
+	flag.Parse()
+
+	client, err := redis.Connect(*url)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "rekon: %v\n", err)
 		os.Exit(1)
 	}
 	defer client.Close()
 
-	p := poller.New(client, 1*time.Second)
+	p := poller.New(client, *interval)
 	p.Start()
 	defer p.Stop()
 
-	m := model.New(p.Results)
+	// LocalAddr is captured once, right after connecting — it stays
+	// constant for the life of this one persistent connection, so
+	// there's no need to re-fetch it on every poll. Passed into Model
+	// so the Slowlog panel can filter out Rekon's own polling commands
+	// (see metrics.FilterOutSelf and TECHNICAL_DEBT.md's Sprint 4 entry).
+	m := model.New(p.Results, client.LocalAddr())
 
 	if _, err := tea.NewProgram(m).Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "rekon: %v\n", err)
