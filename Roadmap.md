@@ -63,14 +63,27 @@ that runs and can be explained, not just compiles.
   replication section, not a broken/empty one)
 - Last save time, RDB/AOF status, save-in-progress flag
 
-### Sprint 6 — Polish + packaging
-- Config: connection string via flag/env, configurable poll interval
-- Graceful handling of Redis disconnecting mid-run (don't crash — show a
-  clear "disconnected, retrying" state)
-- Build a single static binary; test the actual install experience someone
-  would have (not just `go run` from inside the repo)
-- Record the demo GIF (per the "demo quality drives traction" conclusion —
-  don't treat this as an afterthought)
+### Sprint 6 — Polish + packaging — DONE (see notes)
+- [x] Config: connection string via flag/env, configurable poll interval —
+      `--url`/`--interval` flags added.
+- [x] Graceful handling of Redis disconnecting mid-run — `Client.Reconnect()`
+      wired into the poller, verified with a real kill/restart of Redis
+      mid-run; UI shows a clear "retrying automatically" state, never
+      crashes.
+- [x] Build a single static binary; test the actual install experience —
+      verified `CGO_ENABLED=0` static binary, tested from a directory with
+      zero relation to the source repo, and from a fresh `git clone`.
+- [ ] Record the demo GIF — **not achievable in the dev sandbox this was
+      built in** (no real controlling TTY). Recipe documented in
+      LAUNCH_CHECKLIST.md; do this on a real machine before the actual
+      Show HN/Product Hunt post.
+
+Also fixed while verifying this sprint's own bar, beyond the original
+scope list: `Poller.Stop()` double-close panic (Sprint 1 debt), the
+self-polling-appears-in-slowlog issue (Sprint 4 debt), and generic Redis
+error messages that discarded real error text (e.g. ACL NOPERM messages)
+in favor of a useless "wrong type" message — found by actually testing the
+ACL-restriction requirement, not assumed.
 
 ## v1 — explicit non-goals (deferred, stated up front)
 - Cluster-mode / multi-node view
