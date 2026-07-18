@@ -11,6 +11,7 @@ package model
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -333,6 +334,12 @@ func (m Model) renderPersistencePanel() string {
 	p := m.persistence
 	status := p.Status()
 
+	lastSave := "never"
+	if p.RDBLastSaveTime > 0 {
+		elapsed := time.Since(time.Unix(p.RDBLastSaveTime, 0))
+		lastSave = fmt.Sprintf("%s ago", elapsed.Round(time.Second))
+	}
+
 	aofLine := "disabled"
 	if p.AOFEnabled {
 		aofLine = fmt.Sprintf("enabled (last write: %s)", valueOr(p.AOFLastWriteStatus, "unknown"))
@@ -347,8 +354,8 @@ func (m Model) renderPersistencePanel() string {
 	}
 
 	content := fmt.Sprintf(
-		"Persistence\nRDB last save status: %s%s\nchanges since last save: %d\nAOF: %s",
-		valueOr(p.RDBLastBGSaveStatus, "unknown"), inProgress,
+		"Persistence\nlast RDB save: %s\nRDB last save status: %s%s\nchanges since last save: %d\nAOF: %s",
+		lastSave, valueOr(p.RDBLastBGSaveStatus, "unknown"), inProgress,
 		p.RDBChangesSinceLastSave, aofLine,
 	)
 	return panelStyle(status).Render(content)
