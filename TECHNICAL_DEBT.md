@@ -60,7 +60,12 @@ the reasoning from scratch.
 - **Risk if unpaid:** Low today (single call site), but would become a
   real bug source once more call paths exist (e.g. Sprint 2's UI adding
   its own shutdown/error paths that might also call `Stop()`).
-- **Status:** open.
+- **Status:** paid down (Sprint 6) — guarded with `sync.Once`. Verified
+  the fix actually matters (not a no-op change) by temporarily
+  reverting to the unguarded version, confirming
+  `TestStop_SafeToCallTwice` genuinely panics with `close of closed
+  channel` without the fix, then restoring it and confirming the test
+  passes again with zero diff from the committed version.
 
 ## Redis command handling
 
