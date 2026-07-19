@@ -5,7 +5,7 @@
 btop, but it understands Redis.
 
 ![demo placeholder](assets/demo.gif)
-<!-- TODO: record real terminal GIF once Sprint 6 lands — do not fake this -->
+<!-- TODO: record real terminal GIF once Sprint 6 lands - do not fake this -->
 
 ---
 
@@ -17,7 +17,7 @@ a live, glanceable dashboard that lives where you already are: the terminal.
 
 Rekon polls a Redis instance on an interval and renders memory pressure,
 throughput, client connections, the slowlog, replication state, and
-persistence status — live, in one screen, in your terminal.
+persistence status - live, in one screen, in your terminal.
 
 ## What this is not
 
@@ -33,7 +33,7 @@ persistence status — live, in one screen, in your terminal.
 
 ## Install
 
-Once this repo is pushed to GitHub, clone and build it directly — this
+Once this repo is pushed to GitHub, clone and build it directly - this
 works today, no publishing step required:
 
 ```bash
@@ -70,38 +70,38 @@ Press `q` to quit.
 
 ## What you'll see
 
-- **Memory** — used memory, fragmentation ratio, maxmemory + eviction
+- **Memory** - used memory, fragmentation ratio, maxmemory + eviction
   policy, evicted key count
-- **Ops** — instantaneous ops/sec, keyspace hit/miss ratio
-- **Clients** — connected count, blocked count, long-idle connections
-- **Slowlog** — live tail, new entries highlighted since last poll
-- **Replication** — role, connected replica count and per-replica lag
+- **Ops** - instantaneous ops/sec, keyspace hit/miss ratio
+- **Clients** - connected count, blocked count, long-idle connections
+- **Slowlog** - live tail, new entries highlighted since last poll
+- **Replication** - role, connected replica count and per-replica lag
   (always shown; a standalone instance just shows 0 connected replicas
   rather than an error or blank panel)
-- **Persistence** — time since last RDB save, RDB/AOF status,
+- **Persistence** - time since last RDB save, RDB/AOF status,
   save-in-progress flag
 
 ## Roadmap
 
 A rolling-window recording/replay feature (think: a flight recorder for a
-Redis incident — replay the minutes leading up to a problem, attach the
+Redis incident - replay the minutes leading up to a problem, attach the
 recording to a bug report) is planned for v2, once v1 is stable and
 actually used. See `ROADMAP.md` for the full sequencing and what's
 explicitly out of scope for now.
 
 ## Why "Rekon"
 
-Redis + recon (reconnaissance — watching, observing). Built as the first
-implementation of a small pattern, not a Redis-only tool forever — the
+Redis + recon (reconnaissance - watching, observing). Built as the first
+implementation of a small pattern, not a Redis-only tool forever - the
 underlying design isn't wedded to Redis specifically, even though that's
 the only thing it speaks today.
 
 ## Contributing
 
-Contributions welcome. Please open an issue before a large PR — this
+Contributions welcome. Please open an issue before a large PR - this
 project deliberately ships narrow and real rather than broad and
 unfinished; scope changes should be discussed first.
 
 ## License
 
-Apache 2.0 — see `LICENSE`.
+Apache 2.0 - see `LICENSE`.
