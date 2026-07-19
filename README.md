@@ -37,7 +37,7 @@ Once this repo is pushed to GitHub, clone and build it directly - this
 works today, no publishing step required:
 
 ```bash
-git clone https://github.com/<your-username>/rekon.git
+git clone https://github.com/ps-aditya/rekon.git
 cd rekon
 go build -o rekon ./cmd/rekon
 ./rekon --url localhost:6379
@@ -46,7 +46,7 @@ go build -o rekon ./cmd/rekon
 Once a release is tagged, `go install` will also work directly:
 
 ```bash
-go install github.com/<your-username>/rekon@latest
+go install github.com/ps-aditya/rekon@latest
 ```
 
 Requires: network access to a Redis instance you're allowed to run
