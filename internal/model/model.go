@@ -38,6 +38,9 @@ type Model struct {
 	lastErr   error
 	pollCount int
 
+	width  int
+	height int
+
 	memory      metrics.Memory
 	ops         metrics.Ops
 	clients     metrics.Clients
@@ -156,6 +159,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.connected = false
 		return m, nil
 
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
+
 	case tea.KeyMsg:
 		if msg.String() == "q" || msg.String() == "ctrl+c" {
 			return m, tea.Quit
@@ -185,12 +193,73 @@ var (
 	dimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 )
 
-func panelStyle(status metrics.Status) lipgloss.Style {
+// Layout constants. panelChromeWidth is how many columns a panel adds
+// beyond its content width: a 1-char border on each side (2) plus
+// Padding(0,1) adding 1 column on each side (2) = 4 total.
+const (
+	panelChromeWidth       = 4
+	columnGap              = 2
+	twoColumnContentCap    = 34 // don't let panels get silly-wide on huge terminals
+	minReadableContentW    = 24
+	singleColumnContentCap = 60
+	defaultTerminalWidth   = 80 // fallback used only before the first WindowSizeMsg arrives
+)
+
+// panelLayout decides panel content width and whether panels render as
+// a 2-column grid or a single stacked column, based on the real
+// terminal width bubbletea reported via WindowSizeMsg.
+//
+// This exists because panels previously had zero awareness of terminal
+// size — width was driven purely by each panel's own content, so
+// anything narrower than the combined width just broke visually
+// (lines wrapped mid-content by the terminal itself, boxes
+// misaligned). Real bug, found from an actual screenshot of a narrow
+// window.
+func (m Model) panelLayout() (contentWidth int, twoColumn bool) {
+	w := m.width
+	if w <= 0 {
+		w = defaultTerminalWidth // before the first WindowSizeMsg arrives
+	}
+
+	twoColContent := (w - columnGap - 2*panelChromeWidth) / 2
+	if twoColContent >= minReadableContentW {
+		if twoColContent > twoColumnContentCap {
+			twoColContent = twoColumnContentCap
+		}
+		return twoColContent, true
+	}
+
+	singleContent := w - panelChromeWidth
+	if singleContent > singleColumnContentCap {
+		singleContent = singleColumnContentCap
+	}
+	if singleContent < minReadableContentW {
+		singleContent = minReadableContentW // best effort even on a tiny terminal
+	}
+	return singleContent, false
+}
+
+func panelStyle(status metrics.Status, width int) lipgloss.Style {
 	return lipgloss.NewStyle().
 		Border(panelBorder).
 		BorderForeground(statusColor[status]).
 		Padding(0, 1).
-		MarginRight(2)
+		Width(width).
+		MarginRight(columnGap)
+}
+
+// truncateToken hard-truncates a single unbroken token (no spaces to
+// wrap on) to maxLen, appending "..." if it was cut. This exists
+// specifically for Slowlog panel command args: a value like a large
+// base64 blob or JSON payload can be one enormous unbroken "word" with
+// no spaces at all, which lipgloss's word-wrap can't break cleanly —
+// it would otherwise blow out the panel's fixed width regardless of
+// the width fix above.
+func truncateToken(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // View renders the current Model to text.
@@ -202,15 +271,31 @@ func (m Model) View() string {
 		return "rekon\n\nwaiting for first poll...\n\npress q to quit\n"
 	}
 
-	topRow := lipgloss.JoinHorizontal(lipgloss.Top, m.renderMemoryPanel(), m.renderOpsPanel())
-	midRow := lipgloss.JoinHorizontal(lipgloss.Top, m.renderClientsPanel(), m.renderSlowlogPanel())
-	bottomRow := lipgloss.JoinHorizontal(lipgloss.Top, m.renderReplicationPanel(), m.renderPersistencePanel())
+	width, twoColumn := m.panelLayout()
 
-	return fmt.Sprintf("%s\n\n%s\n\n%s\n\n%s\n\npolls received: %d — press q to quit\n",
-		titleStyle.Render("rekon"), topRow, midRow, bottomRow, m.pollCount)
+	memPanel := m.renderMemoryPanel(width)
+	opsPanel := m.renderOpsPanel(width)
+	clientsPanel := m.renderClientsPanel(width)
+	slowlogPanel := m.renderSlowlogPanel(width)
+	replPanel := m.renderReplicationPanel(width)
+	persistPanel := m.renderPersistencePanel(width)
+
+	var body string
+	if twoColumn {
+		row1 := lipgloss.JoinHorizontal(lipgloss.Top, memPanel, opsPanel)
+		row2 := lipgloss.JoinHorizontal(lipgloss.Top, clientsPanel, slowlogPanel)
+		row3 := lipgloss.JoinHorizontal(lipgloss.Top, replPanel, persistPanel)
+		body = lipgloss.JoinVertical(lipgloss.Left, row1, row2, row3)
+	} else {
+		body = lipgloss.JoinVertical(lipgloss.Left,
+			memPanel, opsPanel, clientsPanel, slowlogPanel, replPanel, persistPanel)
+	}
+
+	return fmt.Sprintf("%s\n\n%s\n\npolls received: %d — press q to quit\n",
+		titleStyle.Render("rekon"), body, m.pollCount)
 }
 
-func (m Model) renderMemoryPanel() string {
+func (m Model) renderMemoryPanel(width int) string {
 	status := m.memory.FragmentationStatus()
 
 	ratioText := fmt.Sprintf("%.2f", m.memory.FragmentationRatio)
@@ -226,10 +311,10 @@ func (m Model) renderMemoryPanel() string {
 		valueOr(m.memory.MaxMemoryPolicy, "unknown"),
 		m.memory.EvictedKeys,
 	)
-	return panelStyle(status).Render(content)
+	return panelStyle(status, width).Render(content)
 }
 
-func (m Model) renderOpsPanel() string {
+func (m Model) renderOpsPanel(width int) string {
 	status := m.ops.HitRatioStatus()
 	ratio, ok := m.ops.HitRatio()
 	ratioText := "no data yet"
@@ -240,13 +325,13 @@ func (m Model) renderOpsPanel() string {
 		"Ops\nops/sec: %d\nkeyspace hit ratio: %s\nhits: %d  misses: %d",
 		m.ops.OpsPerSec, ratioText, m.ops.KeyspaceHits, m.ops.KeyspaceMisses,
 	)
-	return panelStyle(status).Render(content)
+	return panelStyle(status, width).Render(content)
 }
 
-func (m Model) renderClientsPanel() string {
+func (m Model) renderClientsPanel(width int) string {
 	if m.clientListErr != nil {
 		content := fmt.Sprintf("Clients\nunavailable: %v", m.clientListErr)
-		return panelStyle(metrics.StatusUnknown).Render(content)
+		return panelStyle(metrics.StatusUnknown, width).Render(content)
 	}
 
 	status := metrics.StatusOK
@@ -265,13 +350,13 @@ func (m Model) renderClientsPanel() string {
 		}
 	}
 
-	return panelStyle(status).Render(b.String())
+	return panelStyle(status, width).Render(b.String())
 }
 
-func (m Model) renderSlowlogPanel() string {
+func (m Model) renderSlowlogPanel(width int) string {
 	if m.slowlogErr != nil {
 		content := fmt.Sprintf("Slowlog\nunavailable: %v", m.slowlogErr)
-		return panelStyle(metrics.StatusUnknown).Render(content)
+		return panelStyle(metrics.StatusUnknown, width).Render(content)
 	}
 
 	status := metrics.StatusOK
@@ -296,14 +381,23 @@ func (m Model) renderSlowlogPanel() string {
 			if m.newSlowlogIDs[e.ID] {
 				tag = " " + newTagStyle.Render("NEW")
 			}
-			fmt.Fprintf(&b, "\n%dus %s%s", e.DurationMicros, strings.Join(e.Args, " "), tag)
+			// Each arg is truncated individually before joining —
+			// a single arg (e.g. a large value passed to SET) can be
+			// one unbroken token with no spaces to wrap on, which
+			// would otherwise blow out the panel's fixed width
+			// regardless of lipgloss's normal word-wrapping.
+			args := make([]string, len(e.Args))
+			for j, a := range e.Args {
+				args[j] = truncateToken(a, 40)
+			}
+			fmt.Fprintf(&b, "\n%dus %s%s", e.DurationMicros, strings.Join(args, " "), tag)
 		}
 	}
 
-	return panelStyle(status).Render(b.String())
+	return panelStyle(status, width).Render(b.String())
 }
 
-func (m Model) renderReplicationPanel() string {
+func (m Model) renderReplicationPanel(width int) string {
 	r := m.replication
 
 	if r.IsReplica() {
@@ -317,7 +411,7 @@ func (m Model) renderReplicationPanel() string {
 			valueOr(r.MasterHost, "unknown"), valueOr(r.MasterPort, "unknown"),
 			valueOr(r.MasterLinkStatus, "unknown"), lastIO,
 		)
-		return panelStyle(status).Render(content)
+		return panelStyle(status, width).Render(content)
 	}
 
 	// Master (which also covers a standalone instance with zero
@@ -327,10 +421,10 @@ func (m Model) renderReplicationPanel() string {
 	for _, s := range r.Slaves {
 		fmt.Fprintf(&b, "\n  %s:%s state=%s lag=%ds", s.IP, s.Port, s.State, s.Lag)
 	}
-	return panelStyle(metrics.StatusOK).Render(b.String())
+	return panelStyle(metrics.StatusOK, width).Render(b.String())
 }
 
-func (m Model) renderPersistencePanel() string {
+func (m Model) renderPersistencePanel(width int) string {
 	p := m.persistence
 	status := p.Status()
 
@@ -358,7 +452,7 @@ func (m Model) renderPersistencePanel() string {
 		lastSave, valueOr(p.RDBLastBGSaveStatus, "unknown"), inProgress,
 		p.RDBChangesSinceLastSave, aofLine,
 	)
-	return panelStyle(status).Render(content)
+	return panelStyle(status, width).Render(content)
 }
 
 func valueOr(s, fallback string) string {
